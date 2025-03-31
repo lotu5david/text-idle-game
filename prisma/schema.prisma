@@ -1,0 +1,41 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+    provider = "prisma-client-js"
+}
+
+datasource db {
+    provider = "sqlite"
+    url      = env("DATABASE_URL")
+}
+
+model Post {
+    id        Int      @id @default(autoincrement())
+    name      String
+    createdAt DateTime @default(now())
+    updatedAt DateTime @updatedAt
+
+    @@index([name])
+}
+model Character {
+  id               String      @id @default(cuid())
+  name             String      @unique
+  strength         Int
+  agility          Int
+  intelligence     Int
+  stamina          Int
+  selectedTalents  String      // 改为普通 String 类型，存储 JSON 字符串
+  startingLocation String
+  difficulty       Difficulty
+  createdAt        DateTime    @default(now())
+  updatedAt        DateTime    @updatedAt
+
+  @@map("characters")
+}
+
+enum Difficulty {
+  EASY
+  NORMAL
+  HARD
+}
