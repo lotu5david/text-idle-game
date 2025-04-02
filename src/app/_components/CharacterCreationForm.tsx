@@ -1,7 +1,7 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { api } from "~/trpc/react";
 
 export default function CharacterCreationForm() {
@@ -13,29 +13,71 @@ export default function CharacterCreationForm() {
     { id: 'int', name: '智力', value: 5, min: 3, max: 9 },
     { id: 'vit', name: '体质', value: 5, min: 3, max: 9 },
   ]);
+  
+  // 计算总点数
+  const totalPoints = attributes.reduce((sum, attr) => sum + attr.value, 0);
+  
+  // 更新属性值
+  const updateAttribute = (id: string, delta: number) => {
+    setAttributes(prev =>
+      prev.map(attr =>
+        attr.id === id
+          ? {
+              ...attr,
+              value: Math.min(
+                Math.max(attr.value + delta, attr.min),
+                attr.max
+              ),
+            }
+          : attr
+      )
+    );
+  };
+  
+  // 防止点数低于20时过度减少
+  const isDecreaseDisabled = (id: string) => {
+    const attr = attributes.find(a => a.id === id);
+    return totalPoints - (attr?.value ?? 0) >= 20;
+  };
+
   const [selectedTalents, setSelectedTalents] = useState<string[]>([]);
   const [startingLocation, setStartingLocation] = useState("village");
   const [difficulty, setDifficulty] = useState("NORMAL");
+  const [randomTalents, setRandomTalents] = useState<any[]>([]); // 存储随机显示的4个天赋
 
   // 获取天赋和起始地点数据
   const { data: talents } = api.game.getTalents.useQuery();
   const { data: startingLocations } = api.game.getStartingLocations.useQuery();
 
-  const { mutate: createCharacter, isLoading } = api.game.createCharacter.useMutation({
-    onSuccess: () => {
+  // 随机选择4个天赋
+  useEffect(() => {
+    if (talents && talents.length > 0) {
+      const shuffled = [...talents].sort(() => 0.5 - Math.random());
+      setRandomTalents(shuffled.slice(0, 4));
+    }
+  }, [talents]);
+
+  // 刷新随机天赋
+  const refreshRandomTalents = () => {
+    if (talents && talents.length > 0) {
+      const shuffled = [...talents].sort(() => 0.5 - Math.random());
+      setRandomTalents(shuffled.slice(0, 4));
+    }
+  };
+
+  const {
+    mutate: createCharacter,
+    isLoading,
+    isError,
+    error,
+  } = api.game.createCharacter.useMutation({
+    onSuccess: (data) => {
       router.push("/game");
     },
+    onError: (err) => {
+      console.error("创建角色失败:", err);
+    },
   });
-
-  const updateAttribute = (id: string, delta: number) => {
-    setAttributes(prev => 
-      prev.map(attr => 
-        attr.id === id 
-          ? { ...attr, value: Math.min(Math.max(attr.value + delta, attr.min), attr.max) }
-          : attr
-      )
-    );
-  };
 
   const handleTalentToggle = (talentId: string) => {
     setSelectedTalents(prev => 
@@ -67,6 +109,16 @@ export default function CharacterCreationForm() {
 
   return (
     <form onSubmit={handleSubmit} className="space-y-8">
+      {error && (
+        <div className="rounded-md bg-red-900/50 p-4 text-red-300">
+          <p className="font-medium">创建角色失败</p>
+          <p>{error.message}</p>
+          {error.data?.code === "BAD_REQUEST" && (
+            <p className="mt-2 text-sm">请检查属性点数总和是否为20</p>
+          )}
+        </div>
+      )}
+      
       {/* 角色名称 */}
       <div>
         <label className="block text-xl font-semibold">角色名称</label>
@@ -84,7 +136,13 @@ export default function CharacterCreationForm() {
       {/* 初始属性分配 */}
       <div className="rounded-md border border-gray-700 p-4">
         <h2 className="mb-4 text-xl font-semibold">
-          属性分配 (剩余点数: <span className="text-amber-400">5</span>)
+          属性分配 (
+          <span className={totalPoints !== 20 ? "text-red-500" : "text-green-500"}>
+            {totalPoints}/20
+          </span>
+          {totalPoints !== 20 && (
+            <span className="ml-2 text-sm text-red-400">(必须正好20点)</span>
+          )}
         </h2>
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 md:grid-cols-3">
           {attributes.map((attr) => (
@@ -94,8 +152,12 @@ export default function CharacterCreationForm() {
                 <button
                   type="button"
                   onClick={() => updateAttribute(attr.id, -1)}
-                  disabled={attr.value <= attr.min}
-                  className="h-8 w-8 rounded-full bg-gray-600 hover:bg-gray-500 disabled:opacity-30"
+                  disabled={attr.value <= attr.min || (totalPoints <= 20 && isDecreaseDisabled(attr.id))}
+                  className={`h-8 w-8 rounded-full ${
+                    (attr.value <= attr.min || (totalPoints <= 20 && isDecreaseDisabled(attr.id))) 
+                      ? "bg-gray-700 cursor-not-allowed" 
+                      : "bg-gray-600 hover:bg-gray-500"
+                  }`}
                 >
                   -
                 </button>
@@ -103,8 +165,12 @@ export default function CharacterCreationForm() {
                 <button
                   type="button"
                   onClick={() => updateAttribute(attr.id, 1)}
-                  disabled={attr.value >= attr.max}
-                  className="h-8 w-8 rounded-full bg-gray-600 hover:bg-gray-500 disabled:opacity-30"
+                  disabled={attr.value >= attr.max || totalPoints >= 20}
+                  className={`h-8 w-8 rounded-full ${
+                    (attr.value >= attr.max || totalPoints >= 20)
+                      ? "bg-gray-700 cursor-not-allowed" 
+                      : "bg-gray-600 hover:bg-gray-500"
+                  }`}
                 >
                   +
                 </button>
@@ -114,14 +180,27 @@ export default function CharacterCreationForm() {
         </div>
       </div>
 
-      {/* 天赋选择 */}
+      {/* 天赋选择 - 修改为只显示随机4个 */}
       <div className="rounded-md border border-gray-700 p-4">
-        <h2 className="mb-4 text-xl font-semibold">选择天赋 (可选2个)</h2>
+        <div className="mb-4 flex items-center justify-between">
+          <h2 className="text-xl font-semibold">随机天赋 (选择0-2个)</h2>
+          <button
+            type="button"
+            onClick={refreshRandomTalents}
+            className="rounded bg-gray-600 px-3 py-1 text-sm hover:bg-gray-500"
+          >
+            🔄 换一批
+          </button>
+        </div>
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-          {talents?.map((talent) => (
+          {randomTalents.map((talent) => (
             <label
               key={talent.id}
-              className="flex cursor-pointer items-start space-x-3 rounded-md p-3 hover:bg-gray-700"
+              className={`flex cursor-pointer items-start space-x-3 rounded-md p-3 ${
+                selectedTalents.includes(talent.id) 
+                  ? 'bg-amber-900/30 border border-amber-500'
+                  : 'hover:bg-gray-700'
+              }`}
             >
               <input
                 type="checkbox"
@@ -130,12 +209,24 @@ export default function CharacterCreationForm() {
                 className="mt-1 h-5 w-5 rounded border-gray-600 text-amber-500 focus:ring-amber-400"
               />
               <div>
-                <div className="font-medium text-amber-400">
+                <div className="font-medium">
+                  <span className={`inline-block w-8 mr-2 text-sm ${
+                    talent.rank === 'SSS' ? 'text-purple-400' :
+                    talent.rank === 'SS' ? 'text-red-400' :
+                    'text-amber-400'
+                  }`}>
+                    [{talent.rank}]
+                  </span>
                   {talent.name}
                 </div>
                 <div className="mt-1 text-sm text-gray-400">
                   {talent.description}
                 </div>
+                {talent.effect && (
+                  <div className="mt-1 text-xs text-green-400">
+                    🚀 效果: {talent.effect}
+                  </div>
+                )}
               </div>
             </label>
           ))}
@@ -212,10 +303,20 @@ export default function CharacterCreationForm() {
       <div className="flex justify-end space-x-4 pt-6">
         <button
           type="submit"
-          disabled={isLoading}
-          className="rounded-md bg-amber-500 px-6 py-3 font-medium text-gray-900 hover:bg-amber-400 disabled:opacity-50"
+          disabled={isLoading || totalPoints !== 20}
+          className={`rounded-md px-6 py-3 font-medium ${
+            totalPoints !== 20
+              ? "bg-gray-600 cursor-not-allowed"
+              : isLoading
+              ? "bg-amber-400 cursor-wait"
+              : "bg-amber-500 hover:bg-amber-400"
+          }`}
         >
-          {isLoading ? "创建中..." : "开始冒险 →"}
+          {totalPoints !== 20
+            ? "请分配正好20点属性"
+            : isLoading
+            ? "创建中..."
+            : "开始冒险 →"}
         </button>
       </div>
     </form>
